@@ -35,6 +35,11 @@ HEADERS = {
 TWSE = "https://www.twse.com.tw"
 TPEX = "https://www.tpex.org.tw"
 
+
+def _clean(v) -> str:
+    """TWSE 欄位可能回 None / int / float / str，統一清成字串。"""
+    return "" if v is None else str(v).replace(",", "").strip()
+
 def _get(url: str, params: dict = None, retries: int = 3) -> Optional[dict]:
     """帶重試的 GET，回傳 JSON dict 或 None"""
     for attempt in range(retries):
@@ -98,8 +103,7 @@ def fetch_taiex(date_str: str) -> dict:
     if not target or not fields:
         return {}
 
-    def clean(val) -> str:
-        return (val or "").replace(",", "").strip()
+    clean = _clean
 
     result = {}
     for i, field in enumerate(fields):
@@ -140,7 +144,7 @@ def fetch_sector_index(date_str: str) -> list[dict]:
         item = {}
         for i, f in enumerate(fields):
             if i < len(row):
-                item[f] = (row[i] or "").replace(",", "").strip()
+                item[f] = _clean(row[i])
         if item:
             results.append({
                 "sector":     item.get("指數名稱", ""),
@@ -173,7 +177,7 @@ def fetch_all_stocks_close(date_str: str) -> list[dict]:
         item = {}
         for i, f in enumerate(fields):
             if i < len(row):
-                item[f] = (row[i] or "").replace(",", "").strip()
+                item[f] = _clean(row[i])
 
         # 計算漲跌%（TWSE 有時不直接給，用收盤-昨收計算）
         try:
@@ -221,7 +225,7 @@ def fetch_institutional_all(date_str: str) -> list[dict]:
         item = {}
         for i, f in enumerate(fields):
             if i < len(row):
-                item[f] = (row[i] or "").replace(",", "").strip()
+                item[f] = _clean(row[i])
 
         def to_int(val: str) -> int:
             try:
@@ -262,7 +266,7 @@ def fetch_foreign_top20(date_str: str) -> list[dict]:
     rows   = data.get("data", [])
     results = []
     for row in rows:
-        item = {f: ((row[i] or "").replace(",","").strip() if i < len(row) else "")
+        item = {f: (_clean(row[i]) if i < len(row) else "")
                 for i, f in enumerate(fields)}
         results.append({
             "code":        item.get("證券代號",""),
@@ -287,7 +291,7 @@ def fetch_trust_top20(date_str: str) -> list[dict]:
     rows   = data.get("data", [])
     results = []
     for row in rows:
-        item = {f: ((row[i] or "").replace(",","").strip() if i < len(row) else "")
+        item = {f: (_clean(row[i]) if i < len(row) else "")
                 for i, f in enumerate(fields)}
         results.append({
             "code":       item.get("證券代號",""),
@@ -312,7 +316,7 @@ def fetch_volume_top20(date_str: str) -> list[dict]:
     rows   = data.get("data", [])
     results = []
     for row in rows:
-        item = {f: ((row[i] or "").replace(",","").strip() if i < len(row) else "")
+        item = {f: (_clean(row[i]) if i < len(row) else "")
                 for i, f in enumerate(fields)}
         results.append({
             "code":    item.get("證券代號",""),
@@ -337,7 +341,7 @@ def fetch_margin(date_str: str) -> dict:
     fields = data.get("fields", [])
     rows   = data.get("data", [])
     for row in rows:
-        item = {f: ((row[i] or "").replace(",","").strip() if i < len(row) else "")
+        item = {f: (_clean(row[i]) if i < len(row) else "")
                 for i, f in enumerate(fields)}
         if "合計" in item.get("股票名稱","") or "合計" in item.get("證券名稱",""):
             return {
@@ -386,7 +390,7 @@ def fetch_tpex_stocks(date_str: str) -> list[dict]:
             "close":      str(row[2]).strip(),
             "change":     str(row[3]).strip(),
             "change_pct": f"{pct:+.2f}%",
-            "volume":     str(row[7] or "").replace(",","").strip(),
+            "volume":     _clean(row[7]),
             "market":     "OTC",
         })
     return results
