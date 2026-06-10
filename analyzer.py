@@ -8,7 +8,8 @@ from pathlib import Path
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 
 sys.path.insert(0, str(Path(__file__).parent))
 sys.path.insert(0, str(Path(__file__).parent / "data"))
@@ -27,7 +28,7 @@ GMAIL_USER      = os.environ["GMAIL_USER"]
 GMAIL_APP_PWD   = os.environ["GMAIL_APP_PWD"]
 RECIPIENT_EMAIL = os.environ.get("RECIPIENT_EMAIL", GMAIL_USER)
 
-genai.configure(api_key=GEMINI_API_KEY)
+gemini_client = genai.Client(api_key=GEMINI_API_KEY)
 
 
 def get_claude_summary(date_str, market_signal, top_sectors, top_stocks):
@@ -46,10 +47,13 @@ def get_claude_summary(date_str, market_signal, top_sectors, top_stocks):
 第三段：風險提示與明日需觀察的重點
 
 語氣要像資深朋友給建議，直接、口語、不廢話。"""
-    model = genai.GenerativeModel("gemini-2.0-flash")
-    resp = model.generate_content(
-        prompt,
-        generation_config={"max_output_tokens": 400, "temperature": 0.7},
+    resp = gemini_client.models.generate_content(
+        model="gemini-2.0-flash",
+        contents=prompt,
+        config=types.GenerateContentConfig(
+            max_output_tokens=400,
+            temperature=0.7,
+        ),
     )
     return resp.text.strip()
 
