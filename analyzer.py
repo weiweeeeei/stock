@@ -48,7 +48,7 @@ def get_claude_summary(date_str, market_signal, top_sectors, top_stocks):
 
 語氣要像資深朋友給建議，直接、口語、不廢話。"""
     resp = gemini_client.models.generate_content(
-        model="gemini-2.0-flash",
+        model="gemini-1.5-flash",
         contents=prompt,
         config=types.GenerateContentConfig(
             max_output_tokens=400,
