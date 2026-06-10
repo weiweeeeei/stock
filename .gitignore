@@ -1,0 +1,16 @@
+# 數據庫（透過 Actions Cache 保存，不進 repo）
+db/
+
+# 報告輸出（透過 Artifacts 保存）
+reports/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# 系統
+.DS_Store
+*.log

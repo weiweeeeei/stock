@@ -1,0 +1,139 @@
+"""
+台股強勢產業分析器 v3
+架構：官方數據 → 存DB → 技術/法人/趨勢計算 → 燈號 → 極簡報告
+"""
+
+import os, sys, json, logging, smtplib, datetime
+from pathlib import Path
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+
+import anthropic
+
+sys.path.insert(0, str(Path(__file__).parent))
+sys.path.insert(0, str(Path(__file__).parent / "data"))
+
+from stock_universe import STOCK_UNIVERSE, get_all_stocks
+from fetcher   import fetch_all_market_data, build_context_for_claude
+from database  import init_db, save_market_data, get_market_trend
+from signals   import score_market, score_sectors, score_stock
+from reporter  import generate_report
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s", datefmt="%H:%M:%S")
+log = logging.getLogger(__name__)
+
+ANTHROPIC_API_KEY = os.environ["ANTHROPIC_API_KEY"]
+GMAIL_USER        = os.environ["GMAIL_USER"]
+GMAIL_APP_PWD     = os.environ["GMAIL_APP_PWD"]
+RECIPIENT_EMAIL   = os.environ.get("RECIPIENT_EMAIL", GMAIL_USER)
+
+
+def get_claude_summary(date_str, market_signal, top_sectors, top_stocks):
+    client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+    green_s  = [s["sector"] for s in top_sectors if s["signal"] == "🟢"][:4]
+    green_st = [f"{s['code']} {s['name']}（{s['one_line']}）"
+                for s in top_stocks if s["signal"] == "🟢"][:4]
+    prompt = f"""今日台股分析結果：
+市場燈號：{market_signal['label']}（{market_signal['score']}分）
+建議：{market_signal['advice']}
+強勢產業：{', '.join(green_s) or '無'}
+綠燈個股：{chr(10).join(green_st) or '無'}
+
+請用繁體中文，寫3段簡短的今日操作建議（每段2-3句，共約150字）：
+第一段：今日市場氛圍與適合的操作心態
+第二段：若有綠燈，具體說明哪些值得關注及理由
+第三段：風險提示與明日需觀察的重點
+
+語氣要像資深朋友給建議，直接、口語、不廢話。"""
+    msg = client.messages.create(
+        model="claude-sonnet-4-20250514", max_tokens=400,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    return msg.content[0].text.strip()
+
+
+def send_email(html, date_str):
+    dd = f"{date_str[:4]}/{date_str[4:6]}/{date_str[6:]}"
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = f"📊 台股日報 {dd}"
+    msg["From"]    = GMAIL_USER
+    msg["To"]      = RECIPIENT_EMAIL
+    msg.attach(MIMEText(html, "html", "utf-8"))
+    with smtplib.SMTP_SSL("smtp.gmail.com", 465) as smtp:
+        smtp.login(GMAIL_USER, GMAIL_APP_PWD)
+        smtp.sendmail(GMAIL_USER, RECIPIENT_EMAIL, msg.as_string())
+    log.info(f"✅ Email 已寄送至 {RECIPIENT_EMAIL}")
+
+
+def main():
+    log.info("=" * 55)
+    log.info("台股日報系統 v3 啟動")
+    init_db()
+
+    log.info("\n[1/5] 抓取 TWSE + TPEx 官方數據...")
+    market_data = fetch_all_market_data()
+    date_str = market_data["date"]
+
+    log.info("\n[2/5] 儲存至資料庫...")
+    save_market_data(market_data)
+
+    log.info("\n[3/5] 計算燈號...")
+    mkt_signal = score_market(market_data)
+    log.info(f"      市場：{mkt_signal['label']} ({mkt_signal['score']}分)")
+
+    sector_signals = score_sectors(
+        market_data.get("sector_twse", []),
+        market_data.get("institutional_twse", []),
+    )
+    green_sec = sum(1 for s in sector_signals if s["signal"] == "🟢")
+
+    all_stocks_db = get_all_stocks()
+    all_price = {s["code"]: s for s in
+                 market_data.get("stocks_twse",[]) + market_data.get("stocks_tpex",[])}
+    all_inst  = {s["code"]: s for s in market_data.get("institutional_twse",[])}
+
+    stock_signals = []
+    for code, info in all_stocks_db.items():
+        price = all_price.get(code, {})
+        if not price:
+            continue
+        inst = all_inst.get(code, {})
+        sig = score_stock(code, {
+            "name":    info["name"],
+            "close":   price.get("close"),
+            "change_pct": price.get("change_pct",""),
+            "institutional": {
+                "foreign_net": inst.get("foreign_net", 0),
+                "trust_net":   inst.get("trust_net",   0),
+                "dealer_net":  inst.get("dealer_net",  0),
+            }
+        })
+        stock_signals.append(sig)
+
+    stock_signals.sort(key=lambda x: x["score"], reverse=True)
+    green_st = sum(1 for s in stock_signals if s["signal"] == "🟢")
+    log.info(f"      🟢產業 {green_sec}個  🟢個股 {green_st}檔")
+
+    # 建立族群→個股對應表（報告展開用）
+    sector_stock_map = {}
+    for s in stock_signals:
+        sec = s.get("sector","")
+        if sec not in sector_stock_map:
+            sector_stock_map[sec] = []
+        sector_stock_map[sec].append(s)
+
+    log.info("\n[4/5] Claude 生成操作建議...")
+    summary = get_claude_summary(date_str, mkt_signal, sector_signals[:10], stock_signals[:10])
+
+    log.info("\n[5/5] 生成並寄送報告...")
+    html = generate_report(date_str, mkt_signal, sector_signals, stock_signals, summary, sector_stock_map)
+
+    out = Path(__file__).parent / f"reports/report_{date_str}.html"
+    out.parent.mkdir(exist_ok=True)
+    out.write_text(html, encoding="utf-8")
+
+    send_email(html, date_str)
+    log.info(f"\n✅ 完成！")
+
+if __name__ == "__main__":
+    main()
