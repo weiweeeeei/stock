@@ -44,11 +44,11 @@ jobs:
 
       - name: 📈 執行台股分析
         env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          GMAIL_USER:        ${{ secrets.GMAIL_USER }}
-          GMAIL_APP_PWD:     ${{ secrets.GMAIL_APP_PWD }}
-          RECIPIENT_EMAIL:   ${{ secrets.RECIPIENT_EMAIL }}
-          SEND_EMAIL:        ${{ github.event.inputs.send_email || 'true' }}
+          GEMINI_API_KEY:  ${{ secrets.GEMINI_API_KEY }}
+          GMAIL_USER:      ${{ secrets.GMAIL_USER }}
+          GMAIL_APP_PWD:   ${{ secrets.GMAIL_APP_PWD }}
+          RECIPIENT_EMAIL: ${{ secrets.RECIPIENT_EMAIL }}
+          SEND_EMAIL:      ${{ github.event.inputs.send_email || 'true' }}
         run: python analyzer.py
 
       # ── 保存 SQLite（讓技術指標歷史累積）─────────────────────────────────

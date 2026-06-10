@@ -8,7 +8,7 @@ from pathlib import Path
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
-import anthropic
+import google.generativeai as genai
 
 sys.path.insert(0, str(Path(__file__).parent))
 sys.path.insert(0, str(Path(__file__).parent / "data"))
@@ -22,14 +22,15 @@ from reporter  import generate_report
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s", datefmt="%H:%M:%S")
 log = logging.getLogger(__name__)
 
-ANTHROPIC_API_KEY = os.environ["ANTHROPIC_API_KEY"]
-GMAIL_USER        = os.environ["GMAIL_USER"]
-GMAIL_APP_PWD     = os.environ["GMAIL_APP_PWD"]
-RECIPIENT_EMAIL   = os.environ.get("RECIPIENT_EMAIL", GMAIL_USER)
+GEMINI_API_KEY  = os.environ["GEMINI_API_KEY"]
+GMAIL_USER      = os.environ["GMAIL_USER"]
+GMAIL_APP_PWD   = os.environ["GMAIL_APP_PWD"]
+RECIPIENT_EMAIL = os.environ.get("RECIPIENT_EMAIL", GMAIL_USER)
+
+genai.configure(api_key=GEMINI_API_KEY)
 
 
 def get_claude_summary(date_str, market_signal, top_sectors, top_stocks):
-    client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
     green_s  = [s["sector"] for s in top_sectors if s["signal"] == "🟢"][:4]
     green_st = [f"{s['code']} {s['name']}（{s['one_line']}）"
                 for s in top_stocks if s["signal"] == "🟢"][:4]
@@ -45,11 +46,12 @@ def get_claude_summary(date_str, market_signal, top_sectors, top_stocks):
 第三段：風險提示與明日需觀察的重點
 
 語氣要像資深朋友給建議，直接、口語、不廢話。"""
-    msg = client.messages.create(
-        model="claude-sonnet-4-20250514", max_tokens=400,
-        messages=[{"role": "user", "content": prompt}],
+    model = genai.GenerativeModel("gemini-2.0-flash")
+    resp = model.generate_content(
+        prompt,
+        generation_config={"max_output_tokens": 400, "temperature": 0.7},
     )
-    return msg.content[0].text.strip()
+    return resp.text.strip()
 
 
 def send_email(html, date_str):
