@@ -117,13 +117,20 @@ def score_stock(code: str, today_data: dict) -> dict:
     result["score_detail"] = scores
     result["reasons"]      = reasons[:5]  # 最多5條理由（報告用）
 
-    # 燈號
-    if total_score >= 70:
+    # 動態門檻：歷史資料不足時放寬綠燈門檻，避免「永遠 0 綠燈」。
+    # 技術面或趨勢面任一被強制中性 → 用較鬆的門檻；資料齊全才恢復 70 / 40。
+    hist_thin = (
+        tech.get("summary", "").startswith("歷史數據不足")
+        or trend.get("days_available", 0) < 5
+    )
+    green_th, yellow_th = (50, 30) if hist_thin else (70, 40)
+
+    if total_score >= green_th:
         result["signal"]       = "🟢"
         result["signal_label"] = "強力做多"
         result["signal_color"] = "#39d98a"
         result["one_line"]     = _gen_one_line("做多", reasons, tech, trend)
-    elif total_score >= 40:
+    elif total_score >= yellow_th:
         result["signal"]       = "🟡"
         result["signal_label"] = "觀察等待"
         result["signal_color"] = "#e8c84a"
