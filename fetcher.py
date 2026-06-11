@@ -68,9 +68,10 @@ def _get(url: str, params: dict = None, retries: int = 3) -> Optional[dict]:
 
 def last_trading_day() -> str:
     """
-    取得最近一個有資料的交易日。
-    從今天往前試抓加權指數，第一個有回應的日期即為答案。
-    這樣會自動處理：週末、台股假日、盤中尚未收盤、TWSE 資料延遲。
+    取得最近一個「資料完整」的交易日。
+    同時探測加權指數與三大法人——後者是 TWSE 較晚才釋出的資料，
+    確保拿到的日期所有下游 API 都已就緒。
+    自動處理：週末、台股假日、盤中尚未收盤、TWSE 資料延遲。
     """
     d = date.today()
     for _ in range(10):
@@ -78,7 +79,7 @@ def last_trading_day() -> str:
             d -= timedelta(days=1)
             continue
         date_str = d.strftime("%Y%m%d")
-        if fetch_taiex(date_str):  # 有資料 → 採用
+        if fetch_taiex(date_str) and fetch_institutional_all(date_str):
             return date_str
         d -= timedelta(days=1)
     return date.today().strftime("%Y%m%d")

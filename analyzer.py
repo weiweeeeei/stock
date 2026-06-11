@@ -47,15 +47,24 @@ def get_claude_summary(date_str, market_signal, top_sectors, top_stocks):
 第三段：風險提示與明日需觀察的重點
 
 語氣要像資深朋友給建議，直接、口語、不廢話。"""
-    resp = gemini_client.models.generate_content(
-        model="gemini-2.5-flash",
-        contents=prompt,
-        config=types.GenerateContentConfig(
-            max_output_tokens=400,
-            temperature=0.7,
-        ),
-    )
-    return resp.text.strip()
+    try:
+        resp = gemini_client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                max_output_tokens=400,
+                temperature=0.7,
+            ),
+        )
+        return resp.text.strip()
+    except Exception as e:
+        log.warning(f"Gemini 呼叫失敗，使用後備摘要：{e}")
+        return (
+            f"【AI 摘要暫不可用】今日大盤：{market_signal['label']}"
+            f"（{market_signal['score']}分）。建議：{market_signal['advice']}。"
+            f"強勢產業：{', '.join(green_s) or '無'}。"
+            f"請參考下方分頁的詳細燈號與排行。"
+        )
 
 
 def send_email(html, date_str):
