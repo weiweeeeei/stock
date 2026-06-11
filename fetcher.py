@@ -275,9 +275,21 @@ def fetch_all_market_data(date_str: str = None) -> dict:
         except: return 0
     result["volume_top20"]  = sorted(stocks, key=_vol, reverse=True)[:20]
 
-    # ── 4. 全市場三大法人彙總（單 call） ──
-    log.info("  [4/5] 全市場三大法人彙總...")
-    result["institutional_summary"] = fetch_institutional_total(date_str)
+    # ── 4. 三大法人彙總（從 137 檔 STOCK_UNIVERSE 加總，與個股顯示一致） ──
+    log.info("  [4/5] 三大法人彙總（STOCK_UNIVERSE 範圍）...")
+    total_f = sum(s["foreign_net"] for s in inst)
+    total_t = sum(s["trust_net"]   for s in inst)
+    total_d = sum(s["dealer_net"]  for s in inst)
+    # FinMind 個股法人單位是「股數」，估算金額：股數 × 平均股價（粗估 60 元）
+    result["institutional_summary"] = {
+        "foreign_total_net":   total_f,
+        "trust_total_net":     total_t,
+        "dealer_total_net":    total_d,
+        "grand_total_net":     total_f + total_t + total_d,
+        "foreign_net_billion": round(total_f * 60 / 1e8, 1),
+        "trust_net_billion":   round(total_t * 60 / 1e8, 1),
+        "dealer_net_billion":  round(total_d * 60 / 1e8, 1),
+    }
 
     # ── 5. 融資融券（單 call） ──
     log.info("  [5/5] 融資融券...")
