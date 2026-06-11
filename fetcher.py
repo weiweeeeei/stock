@@ -67,14 +67,21 @@ def _get(url: str, params: dict = None, retries: int = 3) -> Optional[dict]:
 
 
 def last_trading_day() -> str:
-    """取得最近交易日（跳過週末，節假日需另外處理）"""
+    """
+    取得最近一個有資料的交易日。
+    從今天往前試抓加權指數，第一個有回應的日期即為答案。
+    這樣會自動處理：週末、台股假日、盤中尚未收盤、TWSE 資料延遲。
+    """
     d = date.today()
-    # 若今天是週六(5)往前1天，週日(6)往前2天
-    if d.weekday() == 5:
+    for _ in range(10):
+        if d.weekday() >= 5:  # 週六(5)、週日(6) 直接跳過
+            d -= timedelta(days=1)
+            continue
+        date_str = d.strftime("%Y%m%d")
+        if fetch_taiex(date_str):  # 有資料 → 採用
+            return date_str
         d -= timedelta(days=1)
-    elif d.weekday() == 6:
-        d -= timedelta(days=2)
-    return d.strftime("%Y%m%d")  # TWSE 格式：20250607
+    return date.today().strftime("%Y%m%d")
 
 
 # ── TWSE 上市 API ────────────────────────────────────────────────────────────
