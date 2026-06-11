@@ -27,6 +27,7 @@ GEMINI_API_KEY  = os.environ["GEMINI_API_KEY"]
 GMAIL_USER      = os.environ["GMAIL_USER"]
 GMAIL_APP_PWD   = os.environ["GMAIL_APP_PWD"]
 RECIPIENT_EMAIL = os.environ.get("RECIPIENT_EMAIL", GMAIL_USER)
+PAGES_URL       = os.environ.get("PAGES_URL", "https://weiweeeeei.github.io/stock/")
 
 gemini_client = genai.Client(api_key=GEMINI_API_KEY)
 
@@ -67,13 +68,30 @@ def get_claude_summary(date_str, market_signal, top_sectors, top_stocks):
         )
 
 
+_EMAIL_BANNER = """
+<div style="background:#1a1d28;border:1px solid #39d98a;padding:14px 20px;
+margin:0 0 16px;border-radius:8px;font-family:-apple-system,BlinkMacSystemFont,
+'Segoe UI',Roboto,sans-serif;text-align:center;">
+  <a href="{url}" style="color:#39d98a;font-weight:700;font-size:15px;
+  text-decoration:none;">📱 點此查看完整網頁版（Email 版面如有跑掉以此為準）→</a>
+</div>
+"""
+
+
 def send_email(html, date_str):
     dd = f"{date_str[:4]}/{date_str[4:6]}/{date_str[6:]}"
+    # 把「網頁版」橫幅插到 <body> 開頭，讓 Gmail 不論怎麼處理 CSS 都看得到
+    banner = _EMAIL_BANNER.format(url=PAGES_URL)
+    if "<body" in html:
+        email_html = html.replace("<body>", "<body>" + banner, 1)
+    else:
+        email_html = banner + html
+
     msg = MIMEMultipart("alternative")
     msg["Subject"] = f"📊 台股日報 {dd}"
     msg["From"]    = GMAIL_USER
     msg["To"]      = RECIPIENT_EMAIL
-    msg.attach(MIMEText(html, "html", "utf-8"))
+    msg.attach(MIMEText(email_html, "html", "utf-8"))
     with smtplib.SMTP_SSL("smtp.gmail.com", 465) as smtp:
         smtp.login(GMAIL_USER, GMAIL_APP_PWD)
         smtp.sendmail(GMAIL_USER, RECIPIENT_EMAIL, msg.as_string())
@@ -159,6 +177,13 @@ def main():
     out = Path(__file__).parent / f"reports/report_{date_str}.html"
     out.parent.mkdir(exist_ok=True)
     out.write_text(html, encoding="utf-8")
+
+    # 同時寫到 public/ 給 GitHub Pages 用：index.html 是最新、{date}.html 是當天備份
+    pub = Path(__file__).parent / "public"
+    pub.mkdir(exist_ok=True)
+    (pub / "index.html").write_text(html, encoding="utf-8")
+    (pub / f"{date_str}.html").write_text(html, encoding="utf-8")
+    log.info(f"      已寫入 public/index.html（GitHub Pages 用）")
 
     send_email(html, date_str)
     log.info(f"\n✅ 完成！")
