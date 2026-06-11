@@ -17,7 +17,7 @@ sys.path.insert(0, str(Path(__file__).parent / "data"))
 from stock_universe import STOCK_UNIVERSE, get_all_stocks
 from fetcher   import fetch_all_market_data, build_context_for_claude
 from database  import init_db, save_market_data, get_market_trend
-from signals   import score_market, score_sectors, score_stock
+from signals   import score_market, score_sectors, score_stock, score_sectors_from_stocks
 from reporter  import generate_report
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s", datefmt="%H:%M:%S")
@@ -96,11 +96,11 @@ def main():
     mkt_signal = score_market(market_data)
     log.info(f"      市場：{mkt_signal['label']} ({mkt_signal['score']}分)")
 
+    # 先嘗試用類股指數評分（舊 TWSE 直連方案）
     sector_signals = score_sectors(
         market_data.get("sector_twse", []),
         market_data.get("institutional_twse", []),
     )
-    green_sec = sum(1 for s in sector_signals if s["signal"] == "🟢")
 
     all_stocks_db = get_all_stocks()
     all_price = {s["code"]: s for s in
@@ -127,15 +127,28 @@ def main():
 
     stock_signals.sort(key=lambda x: x["score"], reverse=True)
     green_st = sum(1 for s in stock_signals if s["signal"] == "🟢")
+
+    # 沒有類股指數時（FinMind 免費版），從個股訊號反推產業
+    if not sector_signals:
+        sector_signals = score_sectors_from_stocks(
+            stock_signals,
+            market_data.get("institutional_twse", []),
+        )
+    green_sec = sum(1 for s in sector_signals if s["signal"] == "🟢")
     log.info(f"      🟢產業 {green_sec}個  🟢個股 {green_st}檔")
 
     # 建立族群→個股對應表（報告展開用）
-    sector_stock_map = {}
+    code_to_sector = {
+        code: sec
+        for sec, info in STOCK_UNIVERSE.items()
+        for code in info["stocks"]
+    }
+    sector_stock_map: dict[str, list] = {}
     for s in stock_signals:
-        sec = s.get("sector","")
-        if sec not in sector_stock_map:
-            sector_stock_map[sec] = []
-        sector_stock_map[sec].append(s)
+        sec = code_to_sector.get(s.get("code",""), "")
+        s["sector"] = sec  # 補上 sector 欄位給報告用
+        if sec:
+            sector_stock_map.setdefault(sec, []).append(s)
 
     log.info("\n[4/5] Claude 生成操作建議...")
     summary = get_claude_summary(date_str, mkt_signal, sector_signals[:10], stock_signals[:10])

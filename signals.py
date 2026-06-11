@@ -308,3 +308,76 @@ def score_sectors(sector_data: list[dict], inst_data: list[dict]) -> list[dict]:
     # 按評分排序
     results.sort(key=lambda x: x["score"], reverse=True)
     return results
+
+
+# ── 從個股反推產業（沒類股指數時的後備方案） ─────────────────────────────────
+
+def score_sectors_from_stocks(stock_signals: list[dict], inst_data: list[dict]) -> list[dict]:
+    """
+    從已評分的個股訊號聚合出產業燈號。
+    FinMind 免費版沒有類股指數，所以用個股加總替代：
+      - 同產業綠燈比例高 → 該產業強勢
+      - 同產業外資投信流入 → 加分
+    """
+    from data.stock_universe import STOCK_UNIVERSE
+
+    code_to_sector = {}
+    for sec, info in STOCK_UNIVERSE.items():
+        for code in info["stocks"]:
+            code_to_sector[code] = sec
+
+    code_to_inst = {row.get("code",""): row for row in inst_data}
+
+    sec_stocks: dict[str, list[dict]] = {}
+    for s in stock_signals:
+        sec = code_to_sector.get(s.get("code",""), "")
+        if sec:
+            sec_stocks.setdefault(sec, []).append(s)
+
+    results = []
+    for sec_name in STOCK_UNIVERSE.keys():
+        members = sec_stocks.get(sec_name, [])
+        if not members:
+            continue
+        n = len(members)
+        avg_score = sum(s.get("score", 0) for s in members) / n
+        green = sum(1 for s in members if s.get("signal") == "🟢")
+        red   = sum(1 for s in members if s.get("signal") == "🔴")
+
+        chgs = []
+        for s in members:
+            try:
+                chgs.append(float(str(s.get("change_pct", "0")).replace("%","").replace("+","")))
+            except (ValueError, TypeError):
+                pass
+        avg_chg = sum(chgs) / len(chgs) if chgs else 0
+
+        inst_flow = sum(code_to_inst.get(s.get("code",""), {}).get("total_net", 0) for s in members)
+
+        # 個股平均分 + 綠燈比例加成 − 紅燈比例懲罰
+        sector_score = avg_score + (green / n) * 20 - (red / n) * 10
+        sector_score = max(0, min(100, sector_score))
+
+        if sector_score >= 60:
+            sig, sig_label, sig_color, trend = "🟢", "強勢", "#39d98a", "強勢"
+        elif sector_score >= 40:
+            sig, sig_label, sig_color, trend = "🟡", "觀察", "#e8c84a", "震盪"
+        else:
+            sig, sig_label, sig_color, trend = "🔴", "弱勢", "#ff4d6d", "弱勢"
+
+        results.append({
+            "sector":       sec_name,
+            "change_pct":   f"{avg_chg:+.2f}%",
+            "score":        round(sector_score),
+            "signal":       sig,
+            "signal_label": sig_label,
+            "signal_color": sig_color,
+            "trend_5d":     trend,
+            "inst_flow":    inst_flow,
+            "green_count":  green,
+            "red_count":    red,
+            "stock_count":  n,
+        })
+
+    results.sort(key=lambda x: x["score"], reverse=True)
+    return results
