@@ -3,7 +3,7 @@
 架構：官方數據 → 存DB → 技術/法人/趨勢計算 → 燈號 → 極簡報告
 """
 
-import os, sys, json, logging, smtplib, datetime
+import os, re, sys, json, logging, smtplib, datetime
 from pathlib import Path
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -59,7 +59,8 @@ def get_claude_summary(date_str, market_signal, top_sectors, top_stocks, insight
 第三段【風險與明日觀察】：量價背離的具體個股警示優先講，
 然後給一個明日「驗證點」（例：若XX族群明天量縮回檔則輪動失敗）。
 
-語氣像資深操盤手跟同事覆盤，直接、具體、有數字，禁止空泛形容詞。"""
+語氣像資深操盤手跟同事覆盤，直接、具體、有數字，禁止空泛形容詞。
+直接輸出純文字段落（段首可用【】標題），禁用 Markdown 符號（#、*、-）。"""
     try:
         resp = gemini_client.models.generate_content(
             model="gemini-2.5-flash",
@@ -72,7 +73,11 @@ def get_claude_summary(date_str, market_signal, top_sectors, top_stocks, insight
                 thinking_config=types.ThinkingConfig(thinking_budget=0),
             ),
         )
-        return resp.text.strip()
+        text = resp.text.strip()
+        # 保險：清掉殘留的 Markdown 符號（HTML 報告會原樣顯示）
+        text = re.sub(r"^#{1,4}\s*", "", text, flags=re.M)
+        text = text.replace("**", "")
+        return text
     except Exception as e:
         log.warning(f"Gemini 呼叫失敗，使用後備摘要：{e}")
         return (
