@@ -19,6 +19,8 @@ from fetcher   import fetch_all_market_data, build_context_for_claude
 from database  import init_db, save_market_data, get_market_trend
 from signals   import score_market, score_sectors, score_stock, score_sectors_from_stocks
 from reporter  import generate_report
+from insights  import compute_insights, insights_to_text
+from database  import save_sector_scores
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s", datefmt="%H:%M:%S")
 log = logging.getLogger(__name__)
@@ -32,28 +34,38 @@ PAGES_URL       = os.environ.get("PAGES_URL", "https://weiweeeeei.github.io/stoc
 gemini_client = genai.Client(api_key=GEMINI_API_KEY)
 
 
-def get_claude_summary(date_str, market_signal, top_sectors, top_stocks):
+def get_claude_summary(date_str, market_signal, top_sectors, top_stocks, insights_text=""):
     green_s  = [s["sector"] for s in top_sectors if s["signal"] == "🟢"][:4]
     green_st = [f"{s['code']} {s['name']}（{s['one_line']}）"
                 for s in top_stocks if s["signal"] == "🟢"][:4]
-    prompt = f"""今日台股分析結果：
+    prompt = f"""你是台股盤勢分析師。以下是今日量化系統的完整輸出：
+
 市場燈號：{market_signal['label']}（{market_signal['score']}分）
-建議：{market_signal['advice']}
 強勢產業：{', '.join(green_s) or '無'}
 綠燈個股：{chr(10).join(green_st) or '無'}
 
-請用繁體中文，寫3段簡短的今日操作建議（每段2-3句，共約150字）：
-第一段：今日市場氛圍與適合的操作心態
-第二段：若有綠燈，具體說明哪些值得關注及理由
-第三段：風險提示與明日需觀察的重點
+──系統洞察──
+{insights_text or '（無額外洞察）'}
 
-語氣要像資深朋友給建議，直接、口語、不廢話。"""
+請用繁體中文寫今日盤勢解讀，分3段、共約200字：
+
+第一段【今天哪裡不一樣】：只講「變化」——誰剛轉強、誰連續上榜、資金從哪流到哪。
+不要重複排名清單，不要寫「市場震盪、謹慎操作」這種任何一天都成立的廢話。
+
+第二段【焦點族群為什麼】：挑1-2個最值得注意的族群，講清楚邏輯
+（例：外資錢集中+族群內買超廣度高=真行情；只有單一檔被拉=假突破）。
+若有上中下游鏈動訊號，務必點出。
+
+第三段【風險與明日觀察】：量價背離的具體個股警示優先講，
+然後給一個明日「驗證點」（例：若XX族群明天量縮回檔則輪動失敗）。
+
+語氣像資深操盤手跟同事覆盤，直接、具體、有數字，禁止空泛形容詞。"""
     try:
         resp = gemini_client.models.generate_content(
             model="gemini-2.5-flash",
             contents=prompt,
             config=types.GenerateContentConfig(
-                max_output_tokens=400,
+                max_output_tokens=700,
                 temperature=0.7,
             ),
         )
@@ -168,11 +180,23 @@ def main():
         if sec:
             sector_stock_map.setdefault(sec, []).append(s)
 
-    log.info("\n[4/5] Claude 生成操作建議...")
-    summary = get_claude_summary(date_str, mkt_signal, sector_signals[:10], stock_signals[:10])
+    # 洞察分析：輪動/資金集中/背離/鏈動/主題（先算再存今日分數，避免跟自己比）
+    insights = compute_insights(
+        date_str, sector_signals, stock_signals,
+        market_data.get("institutional_twse", []),
+    )
+    save_sector_scores(date_str, sector_signals)
+    rot = insights["rotation"]
+    log.info(f"      洞察：轉強{len(rot['improving'])} 轉弱{len(rot['weakening'])} "
+             f"背離{len(insights['divergences'])} 鏈動{len(insights['chains'])}")
+
+    log.info("\n[4/5] AI 生成盤勢解讀...")
+    summary = get_claude_summary(date_str, mkt_signal, sector_signals[:10],
+                                 stock_signals[:10], insights_to_text(insights))
 
     log.info("\n[5/5] 生成並寄送報告...")
-    html = generate_report(date_str, mkt_signal, sector_signals, stock_signals, summary, sector_stock_map)
+    html = generate_report(date_str, mkt_signal, sector_signals, stock_signals, summary,
+                           sector_stock_map, insights=insights)
 
     out = Path(__file__).parent / f"reports/report_{date_str}.html"
     out.parent.mkdir(exist_ok=True)

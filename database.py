@@ -84,8 +84,19 @@ def init_db():
             short_balance  INTEGER
         );
 
+        -- 每日族群綜合評分（從個股訊號聚合而來，供輪動偵測用）
+        CREATE TABLE IF NOT EXISTS daily_sector_score (
+            date    TEXT NOT NULL,
+            sector  TEXT NOT NULL,
+            score   INTEGER,
+            signal  TEXT,
+            rank    INTEGER,
+            PRIMARY KEY (date, sector)
+        );
+
         CREATE INDEX IF NOT EXISTS idx_price_code ON daily_price(code, date);
         CREATE INDEX IF NOT EXISTS idx_inst_code  ON daily_institutional(code, date);
+        CREATE INDEX IF NOT EXISTS idx_sector_score ON daily_sector_score(sector, date);
     """)
     conn.commit()
     conn.close()
@@ -167,6 +178,57 @@ def save_market_data(market_data: dict):
 
     conn.commit()
     conn.close()
+
+
+def save_sector_scores(date_str: str, sector_signals: list[dict]):
+    """把當日族群評分寫入歷史，供隔日輪動比較。date_str: YYYYMMDD"""
+    d = f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:]}"
+    conn = get_conn()
+    for rank, s in enumerate(sector_signals, 1):
+        conn.execute("""
+            INSERT OR REPLACE INTO daily_sector_score
+            (date, sector, score, signal, rank) VALUES (?,?,?,?,?)
+        """, (d, s.get("sector",""), s.get("score",0), s.get("signal",""), rank))
+    conn.commit()
+    conn.close()
+
+
+def get_prev_sector_scores(before_date: str) -> dict:
+    """
+    取得 before_date（YYYYMMDD）之前最近一天的族群評分。
+    回傳 {sector: {"score": int, "rank": int, "signal": str}}，無資料回空 dict。
+    """
+    d = f"{before_date[:4]}-{before_date[4:6]}-{before_date[6:]}"
+    conn = get_conn()
+    prev = conn.execute(
+        "SELECT MAX(date) AS d FROM daily_sector_score WHERE date < ?", (d,)
+    ).fetchone()
+    if not prev or not prev["d"]:
+        conn.close()
+        return {}
+    rows = conn.execute(
+        "SELECT sector, score, signal, rank FROM daily_sector_score WHERE date = ?",
+        (prev["d"],)
+    ).fetchall()
+    conn.close()
+    return {r["sector"]: {"score": r["score"], "rank": r["rank"], "signal": r["signal"]}
+            for r in rows}
+
+
+def get_sector_signal_history(days: int = 10) -> dict:
+    """各族群近 N 日燈號序列（新到舊），供連續上榜/連續轉弱計算。"""
+    conn = get_conn()
+    rows = conn.execute("""
+        SELECT sector, date, signal FROM daily_sector_score
+        ORDER BY sector, date DESC
+    """).fetchall()
+    conn.close()
+    out: dict[str, list[str]] = {}
+    for r in rows:
+        lst = out.setdefault(r["sector"], [])
+        if len(lst) < days:
+            lst.append(r["signal"])
+    return out
 
 
 # ── 趨勢計算函數 ──────────────────────────────────────────────────────────────

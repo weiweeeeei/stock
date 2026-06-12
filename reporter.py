@@ -39,7 +39,94 @@ def _badge(consec):
     return ""
 
 
-def generate_report(date_str, market_signal, sector_signals, stock_signals, claude_summary, sector_stock_map):
+def _insights_html(insights) -> str:
+    """「今日焦點」區塊：輪動/資金集中/背離/鏈動/主題，置於總覽最上方。"""
+    if not insights:
+        return ""
+
+    cards = []
+
+    # 族群輪動
+    rot = insights.get("rotation", {})
+    if rot.get("available"):
+        chips = []
+        for d in rot.get("improving", []):
+            tag = " 🆕綠燈" if d.get("new_green") else ""
+            chips.append(f'<span style="background:#0d2818;border:1px solid #39d98a;color:#39d98a;padding:4px 10px;border-radius:4px;font-size:11px;">▲ {d["sector"]} +{d["score_delta"]}{tag}</span>')
+        for d in rot.get("weakening", []):
+            tag = " ⚠️跌出綠燈" if d.get("new_red") else ""
+            chips.append(f'<span style="background:#2a0d14;border:1px solid #ff4d6d;color:#ff4d6d;padding:4px 10px;border-radius:4px;font-size:11px;">▼ {d["sector"]} {d["score_delta"]}{tag}</span>')
+        streak_txt = ""
+        if rot.get("streaks"):
+            streak_txt = '<div style="font-size:11px;color:#8890b0;margin-top:8px;">🔥 連續綠燈：' + "、".join(
+                f'{s["sector"]}<span style="color:#39d98a;font-weight:700;">{s["days"]}日</span>' for s in rot["streaks"][:4]) + '</div>'
+        body = ('<div style="display:flex;gap:6px;flex-wrap:wrap;">' + "".join(chips) + '</div>' + streak_txt) if (chips or streak_txt) else '<div style="font-size:11px;color:#5a6080;">今日族群分數與昨日持平，無明顯輪動</div>'
+        cards.append(('🔄 族群輪動', '#e8c84a', body))
+    else:
+        cards.append(('🔄 族群輪動', '#5a6080',
+                      '<div style="font-size:11px;color:#5a6080;">歷史累積中——明日起可比較今昨變化</div>'))
+
+    # 資金集中度
+    con = insights.get("concentration", {})
+    inflow = con.get("top_inflow", [])
+    if inflow:
+        rows = ""
+        for r in inflow:
+            rows += (f'<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">'
+                     f'<span style="font-size:11px;color:#ddddf0;min-width:90px;">{r["sector"]}</span>'
+                     f'<div style="flex:1;height:6px;background:#1a1d28;border-radius:3px;overflow:hidden;">'
+                     f'<div style="width:{min(100,r["share"])}%;height:100%;background:#39d98a;"></div></div>'
+                     f'<span style="font-size:11px;color:#39d98a;font-weight:700;min-width:80px;text-align:right;">+{r["value_b"]}億 ({r["share"]}%)</span>'
+                     f'<span style="font-size:10px;color:#5a6080;min-width:45px;text-align:right;">{r["breadth"]}檔買</span></div>')
+        out = con.get("top_outflow", [])
+        if out:
+            rows += '<div style="font-size:10px;color:#ff4d6d;margin-top:6px;">撤出：' + "、".join(
+                f'{r["sector"]} {r["value_b"]}億' for r in out) + '</div>'
+        cards.append(('💰 外資資金流向', '#39d98a', rows))
+
+    # 量價背離
+    div = insights.get("divergences", [])
+    if div:
+        rows = ""
+        for d in div[:4]:
+            color = "#ff4d6d" if d["type"] == "出貨嫌疑" else "#39d98a"
+            rows += (f'<div style="font-size:11px;margin-bottom:5px;">'
+                     f'<span style="color:{color};font-weight:700;">[{d["type"]}]</span> '
+                     f'<span style="color:#ddddf0;">{d["name"]}</span> '
+                     f'<span style="color:#8890b0;">{d["desc"]}</span></div>')
+        cards.append(('⚠️ 量價背離', '#ff4d6d', rows))
+
+    # 鏈動訊號
+    chains = insights.get("chains", [])
+    if chains:
+        rows = "".join(f'<div style="font-size:11px;color:#8890b0;margin-bottom:5px;">🧬 {f["desc"]}</div>'
+                       for f in chains)
+        cards.append(('🔗 供應鏈鏈動', '#e8c84a', rows))
+
+    # 主題強弱條
+    themes = insights.get("themes", [])
+    theme_strip = ""
+    if themes:
+        theme_strip = ('<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:14px;padding-top:12px;border-top:1px solid #151720;">'
+                       + "".join(
+                           f'<span style="background:#11131d;border:1px solid #252838;padding:5px 12px;border-radius:4px;font-size:11px;color:#8890b0;">{t["signal"]} {t["theme"]} <span style="font-weight:700;color:#ddddf0;">{t["score"]}</span></span>'
+                           for t in themes) + '</div>')
+
+    cards_html = ""
+    for title, color, body in cards:
+        cards_html += (f'<div style="background:#0d0f1a;border:1px solid #1a1d28;border-left:3px solid {color};padding:14px 18px;">'
+                       f'<div style="font-size:10px;font-weight:700;color:{color};letter-spacing:.15em;margin-bottom:10px;">{title}</div>'
+                       f'{body}</div>')
+
+    return (f'<div style="margin-bottom:20px;">'
+            f'<div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;">'
+            f'<div style="width:3px;height:16px;background:#e8c84a;border-radius:2px;"></div>'
+            f'<span style="font-size:11px;font-weight:700;color:#e8c84a;letter-spacing:.15em;">今日焦點 — 變化與資金流</span></div>'
+            f'<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px;">{cards_html}</div>'
+            f'{theme_strip}</div>')
+
+
+def generate_report(date_str, market_signal, sector_signals, stock_signals, claude_summary, sector_stock_map, insights=None):
     from stock_universe import STOCK_UNIVERSE
 
     date_display = f"{date_str[:4]}/{date_str[4:6]}/{date_str[6:]}"
@@ -337,6 +424,7 @@ function expandAll(expand){{
 
 <!-- TAB: 今日總覽 -->
 <div id="tab_overview" class="tab active" style="padding:20px 24px;">
+  {_insights_html(insights)}
   <!-- 圖例 -->
   <div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:20px;padding:12px 16px;background:#0d0f1a;border:1px solid #151720;">
     <div style="display:flex;align-items:center;gap:6px;"><span style="font-size:15px;">🟢</span><span style="font-size:12px;color:#39d98a;font-weight:700;">強力做多</span><span style="font-size:11px;color:#5a6080;">多維度對齊，可積極布局</span></div>

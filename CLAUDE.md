@@ -1,23 +1,26 @@
 # 台股強勢產業日報系統 — Claude Code Context
 
 ## 專案目的
-每個交易日 14:30 自動從 TWSE+TPEx 官方 API 抓取數據，透過 Claude AI 分析強弱產業與個股，寄送 HTML 報告到 Email。
+每個交易日 14:30（GitHub Actions 免費版常延遲到 ~18:30）自動從 FinMind API 抓取數據，
+量化評分＋洞察分析後由 Gemini 生成盤勢解讀，寄送 HTML 報告到 Email，
+同步發佈到 GitHub Pages（https://weiweeeeei.github.io/stock/）。
 
 ## 檔案結構
 ```
-taiwan-stock-report/
+stock/
 ├── analyzer.py          # 主程式，串接所有模組
-├── fetcher.py           # TWSE+TPEx 官方 API 抓取
+├── fetcher.py           # FinMind API 抓取（137檔個股價格+三大法人）
 ├── database.py          # SQLite 歷史數據存取與趨勢計算
 ├── technicals.py        # 技術指標計算（MA/KD/MACD/布林）
-├── signals.py           # 燈號引擎（整合四維度→🟢🟡🔴）
-├── reporter.py          # HTML 報告生成（四Tab互動頁面）
+├── signals.py           # 燈號引擎（四維度→🟢🟡🔴；無類股指數時從個股反推產業）
+├── insights.py          # 洞察引擎（輪動/資金集中/量價背離/鏈動/主題聚合）
+├── reporter.py          # HTML 報告生成（四Tab互動頁面＋今日焦點區塊）
 ├── data/
-│   └── stock_universe.py  # 台股分類資料庫（30產業/137檔）
+│   └── stock_universe.py  # 台股分類資料庫（30產業/137檔/8主題）
 ├── .github/workflows/
-│   └── daily.yml        # GitHub Actions 排程（週一到週五 14:30）
-├── requirements.txt     # anthropic>=0.34.0, requests>=2.31.0
-└── .gitignore           # 排除 db/ reports/
+│   └── daily.yml        # GitHub Actions 排程＋Pages 部署
+├── requirements.txt     # google-genai>=1.0.0, requests>=2.31.0
+└── .gitignore           # 排除 db/ reports/ public/
 ```
 
 ---
@@ -27,14 +30,17 @@ taiwan-stock-report/
 ```
 analyzer.py main()
   1. init_db()                          # 建立 SQLite 資料表
-  2. fetch_all_market_data()            # fetcher.py → TWSE+TPEx
+  2. fetch_all_market_data()            # fetcher.py → FinMind（137檔並行）
   3. save_market_data()                 # database.py → 存入 db/twstock.db
   4. score_market()                     # signals.py → 市場燈號
-  5. score_sectors()                    # signals.py → 30個產業燈號
-  6. score_stock() × 137檔             # signals.py → 個股燈號
-  7. get_claude_summary()               # 呼叫 Claude sonnet-4-20250514
-  8. generate_report()                  # reporter.py → HTML
-  9. send_email()                       # Gmail SMTP SSL
+  5. score_stock() × 137檔             # signals.py → 個股燈號
+  6. score_sectors_from_stocks()        # signals.py → 30個產業燈號（從個股聚合）
+  7. compute_insights()                 # insights.py → 輪動/集中度/背離/鏈動/主題
+  8. save_sector_scores()               # database.py → 族群分數入庫（供隔日輪動比較）
+  9. get_claude_summary()               # Gemini 2.5 Flash 盤勢解讀
+ 10. generate_report()                  # reporter.py → HTML（含今日焦點）
+ 11. 寫入 public/index.html             # GitHub Pages 部署
+ 12. send_email()                       # Gmail SMTP SSL（頂部帶網頁版連結）
 ```
 
 ---
@@ -42,7 +48,8 @@ analyzer.py main()
 ## 環境變數（GitHub Secrets）
 
 ```
-ANTHROPIC_API_KEY   Claude API Key
+GEMINI_API_KEY      Google Gemini API Key（aistudio.google.com/apikey，免費）
+FINMIND_TOKEN       FinMind API Token（finmindtrade.com，免費 600次/小時）
 GMAIL_USER          寄件 Gmail
 GMAIL_APP_PWD       Gmail 應用程式密碼（16碼）
 RECIPIENT_EMAIL     收件信箱
