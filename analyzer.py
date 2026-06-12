@@ -65,8 +65,11 @@ def get_claude_summary(date_str, market_signal, top_sectors, top_stocks, insight
             model="gemini-2.5-flash",
             contents=prompt,
             config=types.GenerateContentConfig(
-                max_output_tokens=700,
+                max_output_tokens=1200,
                 temperature=0.7,
+                # 2.5 Flash 的思考 token 也算在 max_output_tokens 內，
+                # 不關掉的話正文會被截斷
+                thinking_config=types.ThinkingConfig(thinking_budget=0),
             ),
         )
         return resp.text.strip()
