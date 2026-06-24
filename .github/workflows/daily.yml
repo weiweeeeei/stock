@@ -101,27 +101,27 @@ jobs:
           path: db/twstock.db
           key: twstock-db-v3-${{ runner.os }}-${{ github.run_id }}
 
-      # ── 上傳報告（GitHub Actions Artifacts，可下載）───────────────────────
+      # ── 上傳報告（success() 確保分析中止時不上傳殘缺報告）─────────────────
       - name: 📄 上傳報告
         uses: actions/upload-artifact@v4
-        if: ${{ always() && (github.event.inputs.backfill_days == '' || github.event.inputs.backfill_days == '0') }}
+        if: ${{ success() && (github.event.inputs.backfill_days == '' || github.event.inputs.backfill_days == '0') }}
         with:
           name: 台股日報-${{ github.run_id }}
           path: reports/
           retention-days: 90
 
-      # ── 部署到 GitHub Pages（回填 run 不產報告，故跳過）──────────────────
+      # ── 部署到 GitHub Pages（success() → 分析中止或回填 run 都跳過）──────
       - name: 🌐 設定 Pages
-        if: ${{ github.event.inputs.backfill_days == '' || github.event.inputs.backfill_days == '0' }}
+        if: ${{ success() && (github.event.inputs.backfill_days == '' || github.event.inputs.backfill_days == '0') }}
         uses: actions/configure-pages@v5
 
       - name: 📤 上傳 Pages artifact
-        if: ${{ github.event.inputs.backfill_days == '' || github.event.inputs.backfill_days == '0' }}
+        if: ${{ success() && (github.event.inputs.backfill_days == '' || github.event.inputs.backfill_days == '0') }}
         uses: actions/upload-pages-artifact@v3
         with:
           path: public/
 
       - name: 🚀 部署到 GitHub Pages
         id: deployment
-        if: ${{ github.event.inputs.backfill_days == '' || github.event.inputs.backfill_days == '0' }}
+        if: ${{ success() && (github.event.inputs.backfill_days == '' || github.event.inputs.backfill_days == '0') }}
         uses: actions/deploy-pages@v4

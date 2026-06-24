@@ -30,6 +30,8 @@ GMAIL_USER      = os.environ["GMAIL_USER"]
 GMAIL_APP_PWD   = os.environ["GMAIL_APP_PWD"]
 RECIPIENT_EMAIL = os.environ.get("RECIPIENT_EMAIL", GMAIL_USER)
 PAGES_URL       = os.environ.get("PAGES_URL", "https://weiweeeeei.github.io/stock/")
+# 資料完整度門檻：成功抓取股票數須達 universe 的此比例，否則視為限流/中斷而中止
+MIN_FETCH_RATIO = float(os.environ.get("MIN_FETCH_RATIO", "0.8"))
 
 gemini_client = genai.Client(api_key=GEMINI_API_KEY)
 
@@ -137,6 +139,21 @@ def main():
         log.info("\n[1/5] 抓取 FinMind 市場數據...")
         market_data = fetch_all_market_data()
     date_str = market_data["date"]
+
+    # ── 資料完整度門檻：抓不齊就中止，避免殘缺資料污染資料庫與報告 ──
+    # （from-db 模式是讀本地 DB，不受 API 限流影響，故跳過檢查）
+    if not from_db_date:
+        universe_size = len(get_all_stocks())
+        fetched = len(market_data.get("stocks_twse", [])) + len(market_data.get("stocks_tpex", []))
+        min_required = int(universe_size * MIN_FETCH_RATIO)
+        if fetched < min_required:
+            log.error(
+                f"⛔ 只抓到 {fetched}/{universe_size} 檔（低於門檻 {min_required}，"
+                f"即 {int(MIN_FETCH_RATIO*100)}%），疑似 FinMind 限流或中斷。\n"
+                f"   中止本次執行：不寫入資料庫、不寄信、不部署，保留昨日乾淨資料。"
+            )
+            sys.exit(1)
+        log.info(f"      資料完整度 OK：{fetched}/{universe_size} 檔")
 
     log.info("\n[2/5] 儲存至資料庫...")
     save_market_data(market_data)
