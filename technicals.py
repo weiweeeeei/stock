@@ -27,9 +27,10 @@ def _ema(vals: list[float], n: int) -> list[float]:
     return result
 
 
-def calc_technicals(code: str) -> dict:
+def calc_technicals(code: str, as_of: str = None) -> dict:
     """
     計算個股技術指標
+    as_of: 'YYYY-MM-DD'，只用該日（含）以前的價格（回填重算歷史時用）
     回傳：{
       ma5, ma20, ma60,         # 均線
       kd_k, kd_d,              # KD
@@ -41,7 +42,7 @@ def calc_technicals(code: str) -> dict:
       summary: "技術面一句話"
     }
     """
-    history = get_price_history(code, days=90)
+    history = get_price_history(code, days=90, as_of=as_of)
 
     if len(history) < 5:
         return {

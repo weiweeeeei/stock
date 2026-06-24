@@ -14,10 +14,11 @@ from technicals import calc_technicals
 
 # ── 個股綜合評分 ──────────────────────────────────────────────────────────────
 
-def score_stock(code: str, today_data: dict) -> dict:
+def score_stock(code: str, today_data: dict, as_of: str = None) -> dict:
     """
     整合四個維度計算個股綜合評分
     today_data: 當日收盤 + 法人數據
+    as_of: 'YYYY-MM-DD'，回填重算歷史分數時用，確保只用該日以前的資料
 
     評分維度：
       技術面  30分  (均線/KD/MACD/量能)
@@ -37,7 +38,7 @@ def score_stock(code: str, today_data: dict) -> dict:
     reasons = []
 
     # ── 1. 技術面 (30分) ──────────────────────────────────────────────────────
-    tech = calc_technicals(code)
+    tech = calc_technicals(code, as_of=as_of)
     tech_score = tech["score"]  # 0~100
     scores["tech"] = round(tech_score * 0.30)
     result["tech"] = tech
@@ -51,7 +52,7 @@ def score_stock(code: str, today_data: dict) -> dict:
     trust_today   = inst_today.get("trust_net", 0)
     total_today   = foreign_today + trust_today
 
-    trend = get_institutional_trend(code, days=10)
+    trend = get_institutional_trend(code, days=10, as_of=as_of)
     consec_f = trend.get("consecutive_foreign_buy", 0)
     f5d      = trend.get("total_foreign_5d", 0)
     t5d      = trend.get("trust_5d", 0)
@@ -98,7 +99,7 @@ def score_stock(code: str, today_data: dict) -> dict:
     scores["trend"] = round(min(100, max(0, trend_score)) * 0.20)
 
     # ── 4. 大盤面 (20分) ──────────────────────────────────────────────────────
-    mkt = get_market_trend(days=5)
+    mkt = get_market_trend(days=5, as_of=as_of)
     mkt_bias = mkt.get("market_bias", "震盪")
     if mkt_bias == "偏多":
         mkt_score = 70

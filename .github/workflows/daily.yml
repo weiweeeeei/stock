@@ -15,7 +15,11 @@ on:
         type: choice
         options: ['true', 'false']
       backfill_days:
-        description: '回填歷史天數（0=不回填，正常執行）'
+        description: '回填原始歷史天數（0=不回填，正常執行）'
+        required: false
+        default: '0'
+      replay_days:
+        description: '重算族群分數天數（0=不重算）'
         required: false
         default: '0'
 
@@ -61,6 +65,11 @@ jobs:
         env:
           FINMIND_TOKEN: ${{ secrets.FINMIND_TOKEN }}
         run: python backfill.py ${{ github.event.inputs.backfill_days }}
+
+      # 重算歷史族群分數（純讀 DB、0 次 API，讓族群輪動立即有歷史可比）
+      - name: 🔁 重算族群分數
+        if: ${{ github.event.inputs.replay_days != '' && github.event.inputs.replay_days != '0' }}
+        run: python replay_scores.py ${{ github.event.inputs.replay_days }}
 
       # 回填與當日分析分開跑，避免同一小時內 FinMind API 呼叫超過 600 次上限
       - name: 📈 執行台股分析

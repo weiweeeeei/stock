@@ -253,9 +253,10 @@ def get_sector_signal_history(days: int = 10) -> dict:
 
 # ── 趨勢計算函數 ──────────────────────────────────────────────────────────────
 
-def get_institutional_trend(code: str, days: int = 10) -> dict:
+def get_institutional_trend(code: str, days: int = 10, as_of: str = None) -> dict:
     """
     取得個股最近 N 日法人買賣超趨勢
+    as_of: 'YYYY-MM-DD'，只看該日（含）以前的資料（回填重算歷史時用，避免偷看未來）
     回傳：{
       consecutive_foreign_buy: 連續外資買超天數,
       total_foreign_5d: 近5日外資合計,
@@ -265,13 +266,18 @@ def get_institutional_trend(code: str, days: int = 10) -> dict:
     }
     """
     conn = get_conn()
-    rows = conn.execute("""
-        SELECT date, foreign_net, trust_net, dealer_net, total_net
-        FROM daily_institutional
-        WHERE code = ?
-        ORDER BY date DESC
-        LIMIT ?
-    """, (code, days)).fetchall()
+    if as_of:
+        rows = conn.execute("""
+            SELECT date, foreign_net, trust_net, dealer_net, total_net
+            FROM daily_institutional WHERE code = ? AND date <= ?
+            ORDER BY date DESC LIMIT ?
+        """, (code, as_of, days)).fetchall()
+    else:
+        rows = conn.execute("""
+            SELECT date, foreign_net, trust_net, dealer_net, total_net
+            FROM daily_institutional WHERE code = ?
+            ORDER BY date DESC LIMIT ?
+        """, (code, days)).fetchall()
     conn.close()
 
     if not rows:
@@ -313,18 +319,28 @@ def get_institutional_trend(code: str, days: int = 10) -> dict:
     }
 
 
-def get_price_history(code: str, days: int = 60) -> list[dict]:
-    """取得個股歷史價格（供技術指標計算用）"""
+def get_price_history(code: str, days: int = 60, as_of: str = None) -> list[dict]:
+    """
+    取得個股「最近」N 日歷史價格（升冪，供技術指標計算用）。
+    修正：原本用 ORDER BY date ASC LIMIT N 會抓到最舊的 N 天；
+          應取最近 N 天 → 先 DESC 抓再反轉成升冪。
+    as_of: 'YYYY-MM-DD'，只看該日（含）以前（回填重算歷史時用）。
+    """
     conn = get_conn()
-    rows = conn.execute("""
-        SELECT date, close, volume, high, low, open
-        FROM daily_price
-        WHERE code = ? AND close IS NOT NULL
-        ORDER BY date ASC
-        LIMIT ?
-    """, (code, days)).fetchall()
+    if as_of:
+        rows = conn.execute("""
+            SELECT date, close, volume, high, low, open FROM daily_price
+            WHERE code = ? AND close IS NOT NULL AND date <= ?
+            ORDER BY date DESC LIMIT ?
+        """, (code, as_of, days)).fetchall()
+    else:
+        rows = conn.execute("""
+            SELECT date, close, volume, high, low, open FROM daily_price
+            WHERE code = ? AND close IS NOT NULL
+            ORDER BY date DESC LIMIT ?
+        """, (code, days)).fetchall()
     conn.close()
-    return [dict(r) for r in rows]
+    return [dict(r) for r in reversed(rows)]  # 反轉成升冪（舊→新）
 
 
 def get_sector_trend(sector: str, days: int = 5) -> dict:
@@ -352,16 +368,19 @@ def get_sector_trend(sector: str, days: int = 5) -> dict:
     }
 
 
-def get_market_trend(days: int = 5) -> dict:
-    """大盤近 N 日趨勢"""
+def get_market_trend(days: int = 5, as_of: str = None) -> dict:
+    """大盤近 N 日趨勢。as_of: 'YYYY-MM-DD' 只看該日（含）以前。"""
     conn = get_conn()
-    rows = conn.execute("""
-        SELECT date, taiex_close, taiex_change_pct,
-               foreign_net_b, trust_net_b, margin_balance
-        FROM daily_market
-        ORDER BY date DESC
-        LIMIT ?
-    """, (days,)).fetchall()
+    if as_of:
+        rows = conn.execute("""
+            SELECT date, taiex_close, taiex_change_pct, foreign_net_b, trust_net_b, margin_balance
+            FROM daily_market WHERE date <= ? ORDER BY date DESC LIMIT ?
+        """, (as_of, days)).fetchall()
+    else:
+        rows = conn.execute("""
+            SELECT date, taiex_close, taiex_change_pct, foreign_net_b, trust_net_b, margin_balance
+            FROM daily_market ORDER BY date DESC LIMIT ?
+        """, (days,)).fetchall()
     conn.close()
 
     if not rows:
