@@ -20,7 +20,7 @@ from database  import init_db, save_market_data, get_market_trend
 from signals   import score_market, score_sectors, score_stock, score_sectors_from_stocks
 from reporter  import generate_report
 from insights  import compute_insights, insights_to_text
-from database  import save_sector_scores, get_meta, set_meta
+from database  import save_sector_scores, get_meta, set_meta, build_market_data_from_db
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s", datefmt="%H:%M:%S")
 log = logging.getLogger(__name__)
@@ -123,8 +123,19 @@ def main():
     log.info("台股日報系統 v3 啟動")
     init_db()
 
-    log.info("\n[1/5] 抓取 TWSE + TPEx 官方數據...")
-    market_data = fetch_all_market_data()
+    # --from-db YYYYMMDD：不打 API，直接用資料庫重建當日資料（回填後重產報告用）
+    from_db_date = None
+    if "--from-db" in sys.argv:
+        i = sys.argv.index("--from-db")
+        if i + 1 < len(sys.argv):
+            from_db_date = sys.argv[i + 1]
+
+    if from_db_date:
+        log.info(f"\n[1/5] 從資料庫重建 {from_db_date} 資料（0 API）...")
+        market_data = build_market_data_from_db(from_db_date)
+    else:
+        log.info("\n[1/5] 抓取 FinMind 市場數據...")
+        market_data = fetch_all_market_data()
     date_str = market_data["date"]
 
     log.info("\n[2/5] 儲存至資料庫...")

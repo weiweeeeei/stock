@@ -186,6 +186,61 @@ def save_market_data(market_data: dict):
     conn.close()
 
 
+def build_market_data_from_db(date_str: str) -> dict:
+    """
+    從資料庫重建某日的 market_data（與 fetcher.fetch_all_market_data 同結構），
+    0 次 API 呼叫。供回填後重產報告、或離線重算用。date_str: YYYYMMDD
+    """
+    d = f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:]}"
+    conn = get_conn()
+    prices = conn.execute(
+        "SELECT code,name,close,change,change_pct,volume,open,high,low FROM daily_price WHERE date=?",
+        (d,)).fetchall()
+    insts = conn.execute(
+        "SELECT code,name,foreign_net,trust_net,dealer_net,total_net FROM daily_institutional WHERE date=?",
+        (d,)).fetchall()
+    mkt = conn.execute("SELECT * FROM daily_market WHERE date=?", (d,)).fetchone()
+    conn.close()
+
+    def pct(v):
+        return f"{v:+.2f}%" if v is not None else ""
+
+    stocks = [{"code": r["code"], "name": r["name"], "close": str(r["close"] or ""),
+               "change": str(r["change"] or ""), "change_pct": pct(r["change_pct"]),
+               "volume": str(r["volume"] or ""), "open": str(r["open"] or ""),
+               "high": str(r["high"] or ""), "low": str(r["low"] or "")} for r in prices]
+    inst = [{"code": r["code"], "name": r["name"], "foreign_net": r["foreign_net"],
+             "trust_net": r["trust_net"], "dealer_net": r["dealer_net"],
+             "total_net": r["total_net"]} for r in insts]
+
+    tf = sum(s["foreign_net"] for s in inst)
+    tt = sum(s["trust_net"] for s in inst)
+    td = sum(s["dealer_net"] for s in inst)
+    taiex = {}
+    if mkt:
+        taiex = {"close": str(mkt["taiex_close"] or ""), "change": str(mkt["taiex_change"] or ""),
+                 "change_pct": pct(mkt["taiex_change_pct"])}
+
+    return {
+        "date": date_str, "errors": [],
+        "taiex": taiex,
+        "stocks_twse": stocks, "stocks_tpex": [],
+        "institutional_twse": inst,
+        "foreign_top20": sorted(inst, key=lambda x: x["foreign_net"], reverse=True)[:20],
+        "trust_top20":   sorted(inst, key=lambda x: x["trust_net"], reverse=True)[:20],
+        "volume_top20":  [],
+        "margin": {},
+        "sector_twse": [], "sector_tpex": [],
+        "institutional_summary": {
+            "foreign_total_net": tf, "trust_total_net": tt, "dealer_total_net": td,
+            "grand_total_net": tf + tt + td,
+            "foreign_net_billion": round(tf * 60 / 1e8, 1),
+            "trust_net_billion": round(tt * 60 / 1e8, 1),
+            "dealer_net_billion": round(td * 60 / 1e8, 1),
+        },
+    }
+
+
 def get_meta(key: str) -> Optional[str]:
     conn = get_conn()
     row = conn.execute("SELECT value FROM meta WHERE key = ?", (key,)).fetchone()

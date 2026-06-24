@@ -22,6 +22,10 @@ on:
         description: '重算族群分數天數（0=不重算）'
         required: false
         default: '0'
+      from_db_date:
+        description: '從DB重產報告的日期 YYYYMMDD（空=正常抓 API）'
+        required: false
+        default: ''
 
 permissions:
   contents: read
@@ -72,6 +76,7 @@ jobs:
         run: python replay_scores.py ${{ github.event.inputs.replay_days }}
 
       # 回填與當日分析分開跑，避免同一小時內 FinMind API 呼叫超過 600 次上限
+      # from_db_date 有值時改用資料庫重產（0 API），用於回填後立即補正報告
       - name: 📈 執行台股分析
         if: ${{ github.event.inputs.backfill_days == '' || github.event.inputs.backfill_days == '0' }}
         env:
@@ -81,7 +86,12 @@ jobs:
           GMAIL_APP_PWD:   ${{ secrets.GMAIL_APP_PWD }}
           RECIPIENT_EMAIL: ${{ secrets.RECIPIENT_EMAIL }}
           SEND_EMAIL:      ${{ github.event.inputs.send_email || 'true' }}
-        run: python analyzer.py
+        run: |
+          if [ -n "${{ github.event.inputs.from_db_date }}" ]; then
+            python analyzer.py --from-db ${{ github.event.inputs.from_db_date }}
+          else
+            python analyzer.py
+          fi
 
       # ── 保存 SQLite（每次都存新的一份，讓歷史真正跨天累積）──────────────
       - name: 💾 儲存歷史數據庫
