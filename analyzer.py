@@ -28,7 +28,10 @@ log = logging.getLogger(__name__)
 GEMINI_API_KEY  = os.environ["GEMINI_API_KEY"]
 GMAIL_USER      = os.environ["GMAIL_USER"]
 GMAIL_APP_PWD   = os.environ["GMAIL_APP_PWD"]
-RECIPIENT_EMAIL = os.environ.get("RECIPIENT_EMAIL", GMAIL_USER)
+# RECIPIENT_EMAIL 支援多收件者：用逗號或分號分隔，例如 "a@x.com, b@y.com"
+RECIPIENTS = [e.strip() for e in
+              os.environ.get("RECIPIENT_EMAIL", GMAIL_USER).replace(";", ",").split(",")
+              if e.strip()] or [GMAIL_USER]
 PAGES_URL       = os.environ.get("PAGES_URL", "https://weiweeeeei.github.io/stock/")
 # 資料完整度門檻：成功抓取股票數須達 universe 的此比例，否則視為限流/中斷而中止
 MIN_FETCH_RATIO = float(os.environ.get("MIN_FETCH_RATIO", "0.8"))
@@ -109,15 +112,24 @@ def send_email(html, date_str):
     else:
         email_html = banner + html
 
-    msg = MIMEMultipart("alternative")
-    msg["Subject"] = f"📊 台股日報 {dd}"
-    msg["From"]    = GMAIL_USER
-    msg["To"]      = RECIPIENT_EMAIL
-    msg.attach(MIMEText(email_html, "html", "utf-8"))
+    # 每位收件者各寄一封獨立的信（看不到彼此），共用一條 SMTP 連線
+    sent, failed = 0, []
     with smtplib.SMTP_SSL("smtp.gmail.com", 465) as smtp:
         smtp.login(GMAIL_USER, GMAIL_APP_PWD)
-        smtp.sendmail(GMAIL_USER, RECIPIENT_EMAIL, msg.as_string())
-    log.info(f"✅ Email 已寄送至 {RECIPIENT_EMAIL}")
+        for rcpt in RECIPIENTS:
+            msg = MIMEMultipart("alternative")
+            msg["Subject"] = f"📊 台股日報 {dd}"
+            msg["From"]    = GMAIL_USER
+            msg["To"]      = rcpt
+            msg.attach(MIMEText(email_html, "html", "utf-8"))
+            try:
+                smtp.sendmail(GMAIL_USER, [rcpt], msg.as_string())
+                sent += 1
+            except Exception as e:
+                failed.append(rcpt)
+                log.warning(f"   寄給 {rcpt} 失敗：{e}")
+    log.info(f"✅ Email 已寄送 {sent}/{len(RECIPIENTS)} 位"
+             + (f"（失敗：{', '.join(failed)}）" if failed else ""))
 
 
 def main():
