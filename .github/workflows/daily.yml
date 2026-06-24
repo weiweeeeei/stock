@@ -14,6 +14,10 @@ on:
         default: 'true'
         type: choice
         options: ['true', 'false']
+      backfill_days:
+        description: '回填歷史天數（0=不回填，正常執行）'
+        required: false
+        default: '0'
 
 permissions:
   contents: read
@@ -32,14 +36,15 @@ jobs:
       - name: 📥 Checkout 程式碼
         uses: actions/checkout@v4
 
-      # ── 還原 SQLite 歷史數據（從上次 cache）──────────────────────────────
+      # ── 還原 SQLite 歷史數據（只還原，不自動存，避免凍結舊版本）──────────
       - name: 💾 還原歷史數據庫
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: db/twstock.db
-          key: twstock-db-v2-${{ runner.os }}
+          # primary key 帶 run_id 永遠不會命中，強制走 restore-keys 抓最近一次
+          key: twstock-db-v3-${{ runner.os }}-${{ github.run_id }}
           restore-keys: |
-            twstock-db-v2-
+            twstock-db-v3-${{ runner.os }}-
 
       - name: 🐍 Setup Python 3.11
         uses: actions/setup-python@v5
@@ -49,6 +54,13 @@ jobs:
 
       - name: 📦 安裝依賴
         run: pip install -r requirements.txt
+
+      # 選擇性回填歷史（手動觸發、backfill_days>0 時先灌歷史資料）
+      - name: 🕓 回填歷史資料
+        if: ${{ github.event.inputs.backfill_days != '' && github.event.inputs.backfill_days != '0' }}
+        env:
+          FINMIND_TOKEN: ${{ secrets.FINMIND_TOKEN }}
+        run: python backfill.py ${{ github.event.inputs.backfill_days }}
 
       - name: 📈 執行台股分析
         env:
@@ -60,13 +72,13 @@ jobs:
           SEND_EMAIL:      ${{ github.event.inputs.send_email || 'true' }}
         run: python analyzer.py
 
-      # ── 保存 SQLite（讓技術指標歷史累積）─────────────────────────────────
+      # ── 保存 SQLite（每次都存新的一份，讓歷史真正跨天累積）──────────────
       - name: 💾 儲存歷史數據庫
         uses: actions/cache/save@v4
         if: always()
         with:
           path: db/twstock.db
-          key: twstock-db-v2-${{ runner.os }}-${{ github.run_id }}
+          key: twstock-db-v3-${{ runner.os }}-${{ github.run_id }}
 
       # ── 上傳報告（GitHub Actions Artifacts，可下載）───────────────────────
       - name: 📄 上傳報告
