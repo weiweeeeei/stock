@@ -62,7 +62,9 @@ jobs:
           FINMIND_TOKEN: ${{ secrets.FINMIND_TOKEN }}
         run: python backfill.py ${{ github.event.inputs.backfill_days }}
 
+      # 回填與當日分析分開跑，避免同一小時內 FinMind API 呼叫超過 600 次上限
       - name: 📈 執行台股分析
+        if: ${{ github.event.inputs.backfill_days == '' || github.event.inputs.backfill_days == '0' }}
         env:
           GEMINI_API_KEY:  ${{ secrets.GEMINI_API_KEY }}
           FINMIND_TOKEN:   ${{ secrets.FINMIND_TOKEN }}
@@ -83,21 +85,24 @@ jobs:
       # ── 上傳報告（GitHub Actions Artifacts，可下載）───────────────────────
       - name: 📄 上傳報告
         uses: actions/upload-artifact@v4
-        if: always()
+        if: ${{ always() && (github.event.inputs.backfill_days == '' || github.event.inputs.backfill_days == '0') }}
         with:
           name: 台股日報-${{ github.run_id }}
           path: reports/
           retention-days: 90
 
-      # ── 部署到 GitHub Pages ────────────────────────────────────────────
+      # ── 部署到 GitHub Pages（回填 run 不產報告，故跳過）──────────────────
       - name: 🌐 設定 Pages
+        if: ${{ github.event.inputs.backfill_days == '' || github.event.inputs.backfill_days == '0' }}
         uses: actions/configure-pages@v5
 
       - name: 📤 上傳 Pages artifact
+        if: ${{ github.event.inputs.backfill_days == '' || github.event.inputs.backfill_days == '0' }}
         uses: actions/upload-pages-artifact@v3
         with:
           path: public/
 
       - name: 🚀 部署到 GitHub Pages
         id: deployment
+        if: ${{ github.event.inputs.backfill_days == '' || github.event.inputs.backfill_days == '0' }}
         uses: actions/deploy-pages@v4
