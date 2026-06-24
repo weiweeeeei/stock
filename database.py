@@ -94,6 +94,12 @@ def init_db():
             PRIMARY KEY (date, sector)
         );
 
+        -- 系統狀態（例：最後寄送日期，避免休市日重複寄信）
+        CREATE TABLE IF NOT EXISTS meta (
+            key   TEXT PRIMARY KEY,
+            value TEXT
+        );
+
         CREATE INDEX IF NOT EXISTS idx_price_code ON daily_price(code, date);
         CREATE INDEX IF NOT EXISTS idx_inst_code  ON daily_institutional(code, date);
         CREATE INDEX IF NOT EXISTS idx_sector_score ON daily_sector_score(sector, date);
@@ -176,6 +182,20 @@ def save_market_data(market_data: dict):
             safe_float(s.get("change_pct","0%").replace("%","")),
         ))
 
+    conn.commit()
+    conn.close()
+
+
+def get_meta(key: str) -> Optional[str]:
+    conn = get_conn()
+    row = conn.execute("SELECT value FROM meta WHERE key = ?", (key,)).fetchone()
+    conn.close()
+    return row["value"] if row else None
+
+
+def set_meta(key: str, value: str):
+    conn = get_conn()
+    conn.execute("INSERT OR REPLACE INTO meta (key, value) VALUES (?,?)", (key, value))
     conn.commit()
     conn.close()
 

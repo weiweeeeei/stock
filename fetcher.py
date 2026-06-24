@@ -58,6 +58,35 @@ def _to_finmind_date(date_str: str) -> str:
     return f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:8]}"
 
 
+def _window_start(fd: str, days: int = 14) -> str:
+    """回推 N 個日曆天，給區間查詢用（確保涵蓋至少一個前一交易日）。"""
+    from datetime import datetime
+    d = datetime.strptime(fd, "%Y-%m-%d").date() - timedelta(days=days)
+    return d.strftime("%Y-%m-%d")
+
+
+def _calc_change(rows: list, fd: str) -> tuple:
+    """
+    從 FinMind 價格序列（同一檔、多日）算「今收 / 漲跌 / 漲跌%」。
+    自己用『今收 − 昨收』計算，不信任 FinMind 偶爾出錯的 spread 欄位。
+    回傳 (today_row, change, change_pct)；無資料回 (None, 0, 0)。
+    """
+    rows = [r for r in rows if r.get("date", "") <= fd and r.get("close") is not None]
+    rows.sort(key=lambda r: r["date"])
+    if not rows:
+        return None, 0.0, 0.0
+    today = rows[-1]
+    t_close = float(today.get("close") or 0)
+    if len(rows) >= 2:
+        prev_close = float(rows[-2].get("close") or 0)
+    else:
+        # 只有一天資料 → 退而求其次用 spread 還原昨收
+        prev_close = t_close - float(today.get("spread") or 0)
+    change = t_close - prev_close
+    chg_pct = (change / prev_close * 100) if prev_close else 0.0
+    return today, change, chg_pct
+
+
 def last_trading_day() -> str:
     """
     取得最近一個有資料的交易日。用 TAIEX 做探測。
@@ -76,48 +105,44 @@ def last_trading_day() -> str:
 
 def fetch_taiex(date_str: str) -> dict:
     fd = _to_finmind_date(date_str)
-    data = _get("TaiwanStockPrice", data_id="TAIEX", start_date=fd, end_date=fd)
-    if not data:
+    data = _get("TaiwanStockPrice", data_id="TAIEX",
+                start_date=_window_start(fd), end_date=fd)
+    today, change, chg_pct = _calc_change(data, fd)
+    if not today:
         return {}
-    t = data[0]
-    close  = float(t.get("close") or 0)
-    spread = float(t.get("spread") or 0)
-    prev   = close - spread
-    chg_pct = (spread / prev * 100) if prev else 0.0
     return {
-        "close":      str(t.get("close", "")),
-        "open":       str(t.get("open", "")),
-        "high":       str(t.get("max", "")),
-        "low":        str(t.get("min", "")),
-        "volume":     str(t.get("Trading_Volume", "")),
-        "change":     f"{spread:+.2f}",
+        "close":      str(today.get("close", "")),
+        "open":       str(today.get("open", "")),
+        "high":       str(today.get("max", "")),
+        "low":        str(today.get("min", "")),
+        "volume":     str(today.get("Trading_Volume", "")),
+        "change":     f"{change:+.2f}",
         "change_pct": f"{chg_pct:+.2f}%",
     }
 
 
-def _price_row(p: dict, name: str = "") -> dict:
-    close  = float(p.get("close") or 0)
-    spread = float(p.get("spread") or 0)
-    prev   = close - spread
-    chg_pct = (spread / prev * 100) if prev else 0.0
+def _price_row(today: dict, name: str, change: float, chg_pct: float) -> dict:
     return {
-        "code":       p.get("stock_id", ""),
+        "code":       today.get("stock_id", ""),
         "name":       name,
-        "close":      str(p.get("close", "")),
-        "change":     f"{spread:+.2f}",
+        "close":      str(today.get("close", "")),
+        "change":     f"{change:+.2f}",
         "change_pct": f"{chg_pct:+.2f}%",
-        "volume":     str(p.get("Trading_Volume", "")),
-        "open":       str(p.get("open", "")),
-        "high":       str(p.get("max", "")),
-        "low":        str(p.get("min", "")),
+        "volume":     str(today.get("Trading_Volume", "")),
+        "open":       str(today.get("open", "")),
+        "high":       str(today.get("max", "")),
+        "low":        str(today.get("min", "")),
     }
 
 
 def _fetch_price_one(code: str, name: str, fd: str) -> dict | None:
-    data = _get("TaiwanStockPrice", data_id=code, start_date=fd, end_date=fd)
-    if not data:
+    # 抓一小段區間，自己用今收−昨收算漲跌（不信任 FinMind 偶爾出錯的 spread）
+    data = _get("TaiwanStockPrice", data_id=code,
+                start_date=_window_start(fd), end_date=fd)
+    today, change, chg_pct = _calc_change(data, fd)
+    if not today:
         return None
-    return _price_row(data[0], name)
+    return _price_row(today, name, change, chg_pct)
 
 
 def fetch_stocks_in_universe(date_str: str) -> list[dict]:

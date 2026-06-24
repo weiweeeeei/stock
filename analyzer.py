@@ -20,7 +20,7 @@ from database  import init_db, save_market_data, get_market_trend
 from signals   import score_market, score_sectors, score_stock, score_sectors_from_stocks
 from reporter  import generate_report
 from insights  import compute_insights, insights_to_text
-from database  import save_sector_scores
+from database  import save_sector_scores, get_meta, set_meta
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s", datefmt="%H:%M:%S")
 log = logging.getLogger(__name__)
@@ -217,7 +217,21 @@ def main():
     (pub / f"{date_str}.html").write_text(html, encoding="utf-8")
     log.info(f"      已寫入 public/index.html（GitHub Pages 用）")
 
-    send_email(html, date_str)
+    # 寄信判斷：
+    #  1) SEND_EMAIL=false → 不寄
+    #  2) 排程(schedule)且本資料日期已寄過 → 休市日重跑，不重寄
+    #  3) 手動觸發(workflow_dispatch) → 一律寄（方便測試）
+    send_flag  = os.environ.get("SEND_EMAIL", "true").lower() == "true"
+    event      = os.environ.get("GITHUB_EVENT_NAME", "")
+    last_sent  = get_meta("last_emailed_date")
+
+    if not send_flag:
+        log.info("SEND_EMAIL=false，略過寄信")
+    elif event == "schedule" and last_sent == date_str:
+        log.info(f"資料日期 {date_str} 已寄送過（休市日重跑），略過寄信")
+    else:
+        send_email(html, date_str)
+        set_meta("last_emailed_date", date_str)
     log.info(f"\n✅ 完成！")
 
 if __name__ == "__main__":
